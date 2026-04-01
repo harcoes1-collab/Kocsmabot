@@ -26,7 +26,7 @@ from telegram.ext import (
 # BEÁLLÍTÁSOK
 # =========================
 
-BOT_TOKEN = "BOT_TOKEN"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 DATA_FILE = "bot_data.json"
 
