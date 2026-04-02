@@ -214,10 +214,10 @@ MEDIUM_PATTERNS = {
     "majom",
     "patkány", "patkany",
     "féreg", "fereg",
-    "hányadék", "hanyadek"
+    "hányadék", "hanyadek",
     "retardált", "retardalt",
-    "csicska", "csicskagyász"
-    "szellemi fogyatékos"
+    "csicska", "csicskagyász",
+    "szellemi fogyatékos",
     "nyomorék", "nyomorek"
 }
 
