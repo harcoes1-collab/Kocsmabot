@@ -32,10 +32,11 @@ flask_app = Flask(__name__)
 DATA_FILE = "bot_data.json"
 
 DELETE_BAD_MESSAGES = True
-DELETE_WARNING_AFTER_SECONDS = 18
 
-FIRST_MUTE_MINUTES = 10
-REPEAT_MUTE_MINUTES = 60
+FIRST_MUTE_MINUTES = 5
+SECOND_MUTE_MINUTES = 10
+THIRD_MUTE_MINUTES = 30
+FOURTH_PLUS_MUTE_MINUTES = 60
 
 WELCOME_MESSAGE = (
     "🍻 <b>Üdvözlünk szerény kis kocsmánkban!</b>\n"
@@ -76,7 +77,6 @@ BANNED_PATTERNS = [
     "hányadék", "hanyadek",
     "undorító", "undorito",
     "takony", "taknyos",
-    "csóró", "csoro",
     "szutyok",
     "féreg", "fereg",
     "patkány", "patkany",
@@ -85,7 +85,6 @@ BANNED_PATTERNS = [
     "csicskageci",
     "anyaszomorító",
     "istenbarma",
-    "nyominger",
     "gyászkeret",
     "szellemi fogyatékos",
     "kretén", "kreten",
@@ -282,6 +281,16 @@ def mention_html(user_id: int, first_name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
 
 
+def get_mute_minutes(offense_count: int) -> int:
+    if offense_count == 1:
+        return FIRST_MUTE_MINUTES
+    if offense_count == 2:
+        return SECOND_MUTE_MINUTES
+    if offense_count == 3:
+        return THIRD_MUTE_MINUTES
+    return FOURTH_PLUS_MUTE_MINUTES
+
+
 async def is_user_admin(chat_id: int, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -289,14 +298,6 @@ async def is_user_admin(chat_id: int, user_id: int) -> bool:
     except Exception:
         logger.exception("Nem sikerült admin státuszt ellenőrizni.")
         return False
-
-
-async def delete_message_later(chat_id: int, message_id: int, delay: int):
-    try:
-        await asyncio.sleep(delay)
-        await bot.delete_message(chat_id=chat_id, message_id=message_id)
-    except Exception:
-        pass
 
 
 async def safe_warn_user(chat_id: int, user_id: int, text: str):
@@ -310,9 +311,8 @@ async def safe_warn_user(chat_id: int, user_id: int, text: str):
     set_last_warning_ts(chat_id, user_id, now_ts)
 
     try:
-        sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
         logger.info("safe_warn_user: figyelmeztetés elküldve")
-        await delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS)
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
@@ -390,15 +390,12 @@ async def handle_moderation(message: dict):
 
     if await is_user_admin(chat_id, user_id):
         random_message = random.choice(WARNING_MESSAGES)
-        try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"🍺 {user_mention} {random_message}",
-                parse_mode="HTML",
-            )
-            logger.info("moderate_message: admin warning elküldve")
-        except Exception:
-            logger.exception("Nem sikerült admin warningot küldeni.")
+        await safe_warn_user(
+            chat_id,
+            user_id,
+            f"🍺 {user_mention} {random_message}"
+        )
+        logger.info("moderate_message: admin warning elküldve")
         return
 
     if DELETE_BAD_MESSAGES:
@@ -410,13 +407,16 @@ async def handle_moderation(message: dict):
 
     offense_count = increment_offense(chat_id, user_id)
     random_message = random.choice(WARNING_MESSAGES)
+    mute_minutes = get_mute_minutes(offense_count)
 
     if offense_count == 1:
-        mute_minutes = FIRST_MUTE_MINUTES
         reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc pihenő."
-    else:
-        mute_minutes = REPEAT_MUTE_MINUTES
+    elif offense_count == 2:
         reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc csend."
+    elif offense_count == 3:
+        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc mute."
+    else:
+        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc mute."
 
     until_date = datetime.now(timezone.utc) + timedelta(minutes=mute_minutes)
 
