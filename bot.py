@@ -145,7 +145,7 @@ WARNING_MESSAGES = [
     "Na ezt most elvitte a huzat a kocsmából."
 ]
 
-WARNING_COOLDOWN_SECONDS = 45
+WARNING_COOLDOWN_SECONDS = 5
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
