@@ -5,18 +5,11 @@ import re
 import asyncio
 import random
 import threading
+import html
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, request, abort
-from telegram import Update, ChatPermissions
-from telegram.constants import ParseMode
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram import Bot, ChatPermissions
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
@@ -24,6 +17,9 @@ PORT = int(os.getenv("PORT", "8000"))
 
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
+
+bot = Bot(BOT_TOKEN)
+flask_app = Flask(__name__)
 
 DATA_FILE = "bot_data.json"
 
@@ -273,29 +269,38 @@ def contains_banned_content(text: str) -> str | None:
     return None
 
 
-async def is_user_admin(chat, user_id: int) -> bool:
+def mention_html(user_id: int, first_name: str) -> str:
+    safe_name = html.escape(first_name or "Felhasználó")
+    return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
+
+async def is_user_admin(chat_id: int, user_id: int) -> bool:
     try:
-        member = await chat.get_member(user_id)
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         return member.status in ("administrator", "creator")
     except Exception:
         logger.exception("Nem sikerült admin státuszt ellenőrizni.")
         return False
 
 
-async def delete_later(message, delay: int):
+def run_in_background(coro):
+    def runner():
+        try:
+            asyncio.run(coro)
+        except Exception:
+            logger.exception("Háttérfeladat hiba")
+    threading.Thread(target=runner, daemon=True).start()
+
+
+async def delete_message_later(chat_id: int, message_id: int, delay: int):
     try:
         await asyncio.sleep(delay)
-        await message.delete()
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception:
-        logger.exception("Nem sikerült a késleltetett törlés.")
+        pass
 
 
-async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
-    if not update.effective_chat or not update.effective_user:
-        return
-
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
+async def safe_warn_user(chat_id: int, user_id: int, text: str):
     now_ts = int(datetime.now(timezone.utc).timestamp())
     last_ts = get_last_warning_ts(chat_id, user_id)
 
@@ -306,89 +311,75 @@ async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     set_last_warning_ts(chat_id, user_id, now_ts)
 
     try:
-        sent = await context.bot.send_message(
+        sent = await bot.send_message(
             chat_id=chat_id,
             text=text,
-            parse_mode=ParseMode.HTML,
+            parse_mode="HTML",
         )
-        asyncio.create_task(delete_later(sent, DELETE_WARNING_AFTER_SECONDS))
+        run_in_background(delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS))
         logger.info("safe_warn_user: figyelmeztetés elküldve")
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_start(chat_id: int):
     logger.info("start_command lefutott")
-    if update.message:
-        try:
-            await update.message.reply_text(
-                "🍺 Kocsma moderátor bot aktív.\n"
-                "Figyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
-            )
-            logger.info("start_command: válasz elküldve")
-        except Exception:
-            logger.exception("start_command: nem sikerült válaszolni")
+    await bot.send_message(
+        chat_id=chat_id,
+        text="🍺 Kocsma moderátor bot aktív.\nFigyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
+    )
+    logger.info("start_command: válasz elküldve")
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("help_command lefutott")
-    if update.message:
-        try:
-            await update.message.reply_text(
-                "/start - bot indítása\n"
-                "/help - segítség\n"
-                "/offenses - megmutatja a saját szabálysértéseid számát"
-            )
-        except Exception:
-            logger.exception("help_command: nem sikerült válaszolni")
+async def handle_help(chat_id: int):
+    await bot.send_message(
+        chat_id=chat_id,
+        text="/start - bot indítása\n/help - segítség\n/offenses - megmutatja a saját szabálysértéseid számát"
+    )
 
 
-async def offenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("offenses_command lefutott")
-    if not update.message or not update.effective_chat or not update.effective_user:
-        return
-    count = get_offense(update.effective_chat.id, update.effective_user.id)
-    try:
-        await update.message.reply_text(f"Eddigi szabálysértéseid száma: {count}")
-    except Exception:
-        logger.exception("offenses_command: nem sikerült válaszolni")
+async def handle_offenses(chat_id: int, user_id: int):
+    count = get_offense(chat_id, user_id)
+    await bot.send_message(chat_id=chat_id, text=f"Eddigi szabálysértéseid száma: {count}")
 
 
-async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("welcome_new_members handler lefutott")
-    if not update.message or not update.message.new_chat_members:
-        return
-
-    for member in update.message.new_chat_members:
-        if member.is_bot:
+async def handle_new_members(message: dict):
+    chat = message.get("chat", {})
+    chat_id = chat.get("id")
+    for member in message.get("new_chat_members", []):
+        if member.get("is_bot"):
             continue
         try:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"{member.mention_html()}\n\n{WELCOME_MESSAGE}",
-                parse_mode=ParseMode.HTML,
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"{mention_html(member['id'], member.get('first_name', 'Tag'))}\n\n{WELCOME_MESSAGE}",
+                parse_mode="HTML",
             )
             logger.info("welcome_new_members: üdvözlés elküldve")
         except Exception:
             logger.exception("Nem sikerült üdvözlő üzenetet küldeni.")
 
 
-async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_moderation(message: dict):
     logger.info("moderate_message handler lefutott")
 
-    if not update.message or not update.effective_chat or not update.effective_user:
+    chat = message.get("chat", {})
+    user = message.get("from", {})
+
+    chat_id = chat.get("id")
+    user_id = user.get("id")
+    first_name = user.get("first_name", "Felhasználó")
+    message_id = message.get("message_id")
+
+    if not chat_id or not user_id or not message_id:
         logger.info("moderate_message: hiányzó mezők")
         return
 
-    message = update.message
-    user = update.effective_user
-    chat = update.effective_chat
-
-    if user.is_bot:
+    if user.get("is_bot"):
         logger.info("moderate_message: user bot, kilépés")
         return
 
-    text = message.text or message.caption or ""
+    text = message.get("text") or message.get("caption") or ""
     logger.info("moderate_message: kapott szöveg: %r", text)
 
     if not text.strip():
@@ -400,13 +391,15 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not found:
         return
 
-    if await is_user_admin(chat, user.id):
+    user_mention = mention_html(user_id, first_name)
+
+    if await is_user_admin(chat_id, user_id):
         random_message = random.choice(WARNING_MESSAGES)
         try:
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text=f"🍺 {user.mention_html()} {random_message}",
-                parse_mode=ParseMode.HTML,
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🍺 {user_mention} {random_message}",
+                parse_mode="HTML",
             )
             logger.info("moderate_message: admin warning elküldve")
         except Exception:
@@ -415,33 +408,33 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if DELETE_BAD_MESSAGES:
         try:
-            await message.delete()
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
             logger.info("moderate_message: szabályszegő üzenet törölve")
         except Exception:
             logger.exception("Nem sikerült törölni a szabályszegő üzenetet.")
 
-    offense_count = increment_offense(chat.id, user.id)
+    offense_count = increment_offense(chat_id, user_id)
     random_message = random.choice(WARNING_MESSAGES)
 
     if offense_count == 1:
         mute_minutes = FIRST_MUTE_MINUTES
         reason_text = (
-            f"⚠️ {user.mention_html()} {random_message}\n"
+            f"⚠️ {user_mention} {random_message}\n"
             f"{mute_minutes} perc pihenő."
         )
     else:
         mute_minutes = REPEAT_MUTE_MINUTES
         reason_text = (
-            f"⚠️ {user.mention_html()} {random_message}\n"
+            f"⚠️ {user_mention} {random_message}\n"
             f"{mute_minutes} perc csend."
         )
 
     until_date = datetime.now(timezone.utc) + timedelta(minutes=mute_minutes)
 
     try:
-        await context.bot.restrict_chat_member(
-            chat_id=chat.id,
-            user_id=user.id,
+        await bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
             permissions=ChatPermissions(
                 can_send_messages=False,
                 can_send_audios=False,
@@ -464,72 +457,46 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Nem sikerült mute-olni a felhasználót.")
         await safe_warn_user(
-            update,
-            context,
+            chat_id,
+            user_id,
             (
-                f"⚠️ {user.mention_html()} trágár vagy sértő beszédet használt. "
+                f"⚠️ {user_mention} trágár vagy sértő beszédet használt. "
                 "A mute nem sikerült — ellenőrizd, hogy a bot admin-e és van-e joga korlátozni a tagokat."
             ),
         )
         return
 
-    await safe_warn_user(update, context, reason_text)
+    await safe_warn_user(chat_id, user_id, reason_text)
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.exception("PTB handler hiba", exc_info=context.error)
+async def process_update_data(update_data: dict):
+    message = update_data.get("message")
+    if not message:
+        logger.info("Nem message típusú update, kihagyva.")
+        return
 
+    chat = message.get("chat", {})
+    user = message.get("from", {})
+    chat_id = chat.get("id")
+    user_id = user.get("id")
+    text = message.get("text") or ""
 
-def build_application() -> Application:
-    app = Application.builder().token(BOT_TOKEN).build()
+    if message.get("new_chat_members"):
+        await handle_new_members(message)
 
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("offenses", offenses_command))
-    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, moderate_message))
-    app.add_handler(MessageHandler(filters.CAPTION, moderate_message))
-    app.add_error_handler(error_handler)
+    if text == "/start":
+        await handle_start(chat_id)
+        return
 
-    return app
+    if text == "/help":
+        await handle_help(chat_id)
+        return
 
+    if text == "/offenses":
+        await handle_offenses(chat_id, user_id)
+        return
 
-telegram_app = build_application()
-flask_app = Flask(__name__)
-
-telegram_loop = asyncio.new_event_loop()
-telegram_ready = False
-
-
-def _run_loop_forever():
-    asyncio.set_event_loop(telegram_loop)
-    telegram_loop.run_forever()
-
-
-loop_thread = threading.Thread(target=_run_loop_forever, daemon=True)
-loop_thread.start()
-
-
-async def _telegram_startup():
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-
-try:
-    startup_future = asyncio.run_coroutine_threadsafe(_telegram_startup(), telegram_loop)
-    startup_future.result(timeout=30)
-    telegram_ready = True
-    logger.info("Telegram application inicializálva.")
-except Exception:
-    logger.exception("Nem sikerült inicializálni a Telegram applicationt.")
-
-
-def _log_task_result(future):
-    try:
-        future.result()
-        logger.info("Aszinkron webhook feldolgozás lefutott")
-    except Exception:
-        logger.exception("Aszinkron webhook feldolgozási hiba")
+    await handle_moderation(message)
 
 
 @flask_app.get("/")
@@ -539,33 +506,18 @@ def healthcheck():
 
 @flask_app.get("/health")
 def health():
-    return {"status": "ok", "telegram_ready": telegram_ready}, 200
+    return {"status": "ok"}, 200
 
 
 @flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
 def webhook():
-    if not telegram_ready:
-        logger.error("Telegram app még nem ready.")
-        abort(503)
-
     update_data = request.get_json(silent=True)
     if not update_data:
         logger.error("Nem jött JSON a webhookra.")
         abort(400)
 
     logger.info("Webhook update megérkezett: %s", update_data)
-
-    try:
-        update = Update.de_json(update_data, telegram_app.bot)
-        future = asyncio.run_coroutine_threadsafe(
-            telegram_app.process_update(update),
-            telegram_loop,
-        )
-        future.add_done_callback(_log_task_result)
-    except Exception:
-        logger.exception("Nem sikerült feldolgozni a webhook update-et.")
-        return "error", 500
-
+    run_in_background(process_update_data(update_data))
     return "ok", 200
 
 
