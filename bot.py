@@ -278,6 +278,7 @@ async def is_user_admin(chat, user_id: int) -> bool:
         member = await chat.get_member(user_id)
         return member.status in ("administrator", "creator")
     except Exception:
+        logger.exception("Nem sikerült admin státuszt ellenőrizni.")
         return False
 
 
@@ -286,11 +287,12 @@ async def delete_later(message, delay: int):
         await asyncio.sleep(delay)
         await message.delete()
     except Exception:
-        pass
+        logger.exception("Nem sikerült a késleltetett törlés.")
 
 
 async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     if not update.effective_chat or not update.effective_user:
+        logger.info("safe_warn_user: nincs effective_chat vagy effective_user")
         return
 
     chat_id = update.effective_chat.id
@@ -299,11 +301,13 @@ async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     last_ts = get_last_warning_ts(chat_id, user_id)
 
     if now_ts - last_ts < WARNING_COOLDOWN_SECONDS:
+        logger.info("safe_warn_user: cooldown aktív")
         return
 
     set_last_warning_ts(chat_id, user_id, now_ts)
 
     try:
+        logger.info("safe_warn_user: figyelmeztetés küldése chat_id=%s", chat_id)
         sent = await context.bot.send_message(
             chat_id=chat_id,
             text=text,
@@ -315,30 +319,45 @@ async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("start_command lefutott")
     if update.message:
-        await update.message.reply_text(
-            "🍺 Kocsma moderátor bot aktív.\n"
-            "Figyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
-        )
+        try:
+            await update.message.reply_text(
+                "🍺 Kocsma moderátor bot aktív.\n"
+                "Figyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
+            )
+            logger.info("start_command: válasz elküldve")
+        except Exception:
+            logger.exception("start_command: nem sikerült válaszolni")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("help_command lefutott")
     if update.message:
-        await update.message.reply_text(
-            "/start - bot indítása\n"
-            "/help - segítség\n"
-            "/offenses - megmutatja a saját szabálysértéseid számát"
-        )
+        try:
+            await update.message.reply_text(
+                "/start - bot indítása\n"
+                "/help - segítség\n"
+                "/offenses - megmutatja a saját szabálysértéseid számát"
+            )
+        except Exception:
+            logger.exception("help_command: nem sikerült válaszolni")
 
 
 async def offenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("offenses_command lefutott")
     if not update.message or not update.effective_chat or not update.effective_user:
+        logger.info("offenses_command: hiányzó update mezők")
         return
     count = get_offense(update.effective_chat.id, update.effective_user.id)
-    await update.message.reply_text(f"Eddigi szabálysértéseid száma: {count}")
+    try:
+        await update.message.reply_text(f"Eddigi szabálysértéseid száma: {count}")
+    except Exception:
+        logger.exception("offenses_command: nem sikerült válaszolni")
 
 
 async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("welcome_new_members handler lefutott")
     if not update.message or not update.message.new_chat_members:
         return
 
@@ -351,12 +370,16 @@ async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE
                 text=f"{member.mention_html()}\n\n{WELCOME_MESSAGE}",
                 parse_mode=ParseMode.HTML,
             )
+            logger.info("welcome_new_members: üdvözlés elküldve")
         except Exception:
             logger.exception("Nem sikerült üdvözlő üzenetet küldeni.")
 
 
 async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("moderate_message handler lefutott")
+
     if not update.message or not update.effective_chat or not update.effective_user:
+        logger.info("moderate_message: hiányzó mezők")
         return
 
     message = update.message
@@ -364,13 +387,19 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
 
     if user.is_bot:
+        logger.info("moderate_message: user bot, kilépés")
         return
 
     text = message.text or message.caption or ""
+    logger.info("moderate_message: kapott szöveg: %r", text)
+
     if not text.strip():
+        logger.info("moderate_message: üres szöveg")
         return
 
     found = contains_banned_content(text)
+    logger.info("moderate_message: talált tiltott minta = %r", found)
+
     if not found:
         return
 
@@ -382,6 +411,7 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=f"🍺 {user.mention_html()} {random_message}",
                 parse_mode=ParseMode.HTML,
             )
+            logger.info("moderate_message: admin warning elküldve")
         except Exception:
             logger.exception("Nem sikerült admin warningot küldeni.")
         return
@@ -389,6 +419,7 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if DELETE_BAD_MESSAGES:
         try:
             await message.delete()
+            logger.info("moderate_message: szabályszegő üzenet törölve")
         except Exception:
             logger.exception("Nem sikerült törölni a szabályszegő üzenetet.")
 
@@ -432,6 +463,7 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
             until_date=until_date,
         )
+        logger.info("moderate_message: mute sikeres")
     except Exception:
         logger.exception("Nem sikerült mute-olni a felhasználót.")
         await safe_warn_user(
@@ -493,6 +525,7 @@ except Exception:
 def _log_task_result(future):
     try:
         future.result()
+        logger.info("Aszinkron webhook feldolgozás lefutott")
     except Exception:
         logger.exception("Aszinkron webhook feldolgozási hiba")
 
