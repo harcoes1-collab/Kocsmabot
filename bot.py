@@ -383,7 +383,7 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML,
             )
         except Exception:
-            pass
+            logger.exception("Nem sikerült admin warningot küldeni.")
         return
 
     if DELETE_BAD_MESSAGES:
@@ -481,9 +481,13 @@ async def _telegram_startup():
     await telegram_app.start()
 
 
-startup_future = asyncio.run_coroutine_threadsafe(_telegram_startup(), telegram_loop)
-startup_future.result()
-telegram_ready = True
+try:
+    startup_future = asyncio.run_coroutine_threadsafe(_telegram_startup(), telegram_loop)
+    startup_future.result(timeout=30)
+    telegram_ready = True
+    logger.info("Telegram application inicializálva.")
+except Exception:
+    logger.exception("Nem sikerült inicializálni a Telegram applicationt.")
 
 
 @flask_app.get("/")
@@ -491,23 +495,42 @@ def healthcheck():
     return "OK", 200
 
 
+@flask_app.get("/health")
+def health():
+    return {"status": "ok", "telegram_ready": telegram_ready}, 200
+
+
 @flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
 def webhook():
-    if not telegram_ready:
-        abort(503)
+    global telegram_ready
 
-    update_data = request.get_json(silent=True)
-    if not update_data:
-        abort(400)
+    try:
+        if not telegram_ready:
+            logger.error("Telegram app még nem ready.")
+            abort(503)
 
-    update = Update.de_json(update_data, telegram_app.bot)
-    future = asyncio.run_coroutine_threadsafe(
-        telegram_app.process_update(update),
-        telegram_loop,
-    )
-    future.result()
+        update_data = request.get_json(silent=True)
+        if not update_data:
+            logger.error("Nem jött JSON a webhookra.")
+            abort(400)
 
-    return "ok", 200
+        logger.info("Webhook update megérkezett: %s", update_data)
+
+        update = Update.de_json(update_data, telegram_app.bot)
+
+        future = asyncio.run_coroutine_threadsafe(
+            telegram_app.process_update(update),
+            telegram_loop,
+        )
+
+        future.result(timeout=25)
+
+        logger.info("Webhook update feldolgozva.")
+        return "ok", 200
+
+    except Exception:
+        logger.exception("Hiba a webhook feldolgozás közben")
+        return "error", 500
 
 
 if __name__ == "__main__":
