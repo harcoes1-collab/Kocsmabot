@@ -527,9 +527,9 @@ except Exception:
 def _log_task_result(future):
     try:
         future.result()
-        logger.info("Update betéve a queue-ba")
+        logger.info("Aszinkron webhook feldolgozás lefutott")
     except Exception:
-        logger.exception("Aszinkron queue hiba")
+        logger.exception("Aszinkron webhook feldolgozási hiba")
 
 
 @flask_app.get("/")
@@ -558,12 +558,12 @@ def webhook():
     try:
         update = Update.de_json(update_data, telegram_app.bot)
         future = asyncio.run_coroutine_threadsafe(
-            telegram_app.update_queue.put(update),
+            telegram_app.process_update(update),
             telegram_loop,
         )
         future.add_done_callback(_log_task_result)
     except Exception:
-        logger.exception("Nem sikerült queue-ba rakni az update-et.")
+        logger.exception("Nem sikerült feldolgozni a webhook update-et.")
         return "error", 500
 
     return "ok", 200
