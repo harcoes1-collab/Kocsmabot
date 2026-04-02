@@ -18,15 +18,6 @@ PORT = int(os.getenv("PORT", "8000"))
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
 
-request_client = HTTPXRequest(
-    connection_pool_size=10,
-    pool_timeout=20.0,
-    read_timeout=20.0,
-    write_timeout=20.0,
-    connect_timeout=20.0,
-)
-
-bot = Bot(BOT_TOKEN, request=request_client)
 flask_app = Flask(__name__)
 
 DATA_FILE = "bot_data.json"
@@ -64,7 +55,6 @@ BANNED_PATTERNS = [
     "rohadék", "rohadek", "rohadt", "rohadt élet",
     "dög", "dögölj meg", "dogolj meg",
     "buzi",
-    "gyoker", "gyökér",
     "kocsog", "köcsög", "kocsogok", "köcsögök",
     "balfasz", "balfaszok",
     "csicska", "csicskagyász",
@@ -73,11 +63,8 @@ BANNED_PATTERNS = [
     "segg", "seggfej", "seggnyaló",
     "segghuly", "segghülye",
     "tetves", "tetves kurva",
-    "szánalmas", "szanalmas",
     "hányadék", "hanyadek",
     "undorító", "undorito",
-    "takony", "taknyos",
-    "szutyok",
     "féreg", "fereg",
     "patkány", "patkany",
     "majom", "majomarc",
@@ -166,6 +153,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def create_bot() -> Bot:
+    request_client = HTTPXRequest(
+        connection_pool_size=10,
+        pool_timeout=20.0,
+        read_timeout=20.0,
+        write_timeout=20.0,
+        connect_timeout=20.0,
+    )
+    return Bot(BOT_TOKEN, request=request_client)
 
 
 def load_data():
@@ -291,7 +289,7 @@ def get_mute_minutes(offense_count: int) -> int:
     return FOURTH_PLUS_MUTE_MINUTES
 
 
-async def is_user_admin(chat_id: int, user_id: int) -> bool:
+async def is_user_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         return member.status in ("administrator", "creator")
@@ -300,7 +298,7 @@ async def is_user_admin(chat_id: int, user_id: int) -> bool:
         return False
 
 
-async def safe_warn_user(chat_id: int, user_id: int, text: str):
+async def safe_warn_user(bot: Bot, chat_id: int, user_id: int, text: str):
     now_ts = int(datetime.now(timezone.utc).timestamp())
     last_ts = get_last_warning_ts(chat_id, user_id)
 
@@ -317,7 +315,7 @@ async def safe_warn_user(chat_id: int, user_id: int, text: str):
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
 
-async def handle_start(chat_id: int):
+async def handle_start(bot: Bot, chat_id: int):
     logger.info("start_command lefutott")
     await bot.send_message(
         chat_id=chat_id,
@@ -326,19 +324,19 @@ async def handle_start(chat_id: int):
     logger.info("start_command: válasz elküldve")
 
 
-async def handle_help(chat_id: int):
+async def handle_help(bot: Bot, chat_id: int):
     await bot.send_message(
         chat_id=chat_id,
         text="/start - bot indítása\n/help - segítség\n/offenses - megmutatja a saját szabálysértéseid számát"
     )
 
 
-async def handle_offenses(chat_id: int, user_id: int):
+async def handle_offenses(bot: Bot, chat_id: int, user_id: int):
     count = get_offense(chat_id, user_id)
     await bot.send_message(chat_id=chat_id, text=f"Eddigi szabálysértéseid száma: {count}")
 
 
-async def handle_new_members(message: dict):
+async def handle_new_members(bot: Bot, message: dict):
     chat = message.get("chat", {})
     chat_id = chat.get("id")
     for member in message.get("new_chat_members", []):
@@ -355,13 +353,14 @@ async def handle_new_members(message: dict):
             logger.exception("Nem sikerült üdvözlő üzenetet küldeni.")
 
 
-async def handle_moderation(message: dict):
+async def handle_moderation(bot: Bot, message: dict):
     logger.info("moderate_message handler lefutott")
 
     chat = message.get("chat", {})
     user = message.get("from", {})
 
     chat_id = chat.get("id")
+    chat_type = chat.get("type")
     user_id = user.get("id")
     first_name = user.get("first_name", "Felhasználó")
     message_id = message.get("message_id")
@@ -388,9 +387,10 @@ async def handle_moderation(message: dict):
 
     user_mention = mention_html(user_id, first_name)
 
-    if await is_user_admin(chat_id, user_id):
+    if await is_user_admin(bot, chat_id, user_id):
         random_message = random.choice(WARNING_MESSAGES)
         await safe_warn_user(
+            bot,
             chat_id,
             user_id,
             f"🍺 {user_mention} {random_message}"
@@ -408,6 +408,16 @@ async def handle_moderation(message: dict):
     offense_count = increment_offense(chat_id, user_id)
     random_message = random.choice(WARNING_MESSAGES)
     mute_minutes = get_mute_minutes(offense_count)
+
+    if chat_type != "supergroup":
+        await safe_warn_user(
+            bot,
+            chat_id,
+            user_id,
+            f"⚠️ {user_mention} {random_message}"
+        )
+        logger.info("moderate_message: nem supergroup, mute kihagyva")
+        return
 
     if offense_count == 1:
         reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc pihenő."
@@ -446,19 +456,19 @@ async def handle_moderation(message: dict):
     except Exception:
         logger.exception("Nem sikerült mute-olni a felhasználót.")
         await safe_warn_user(
+            bot,
             chat_id,
             user_id,
-            (
-                f"⚠️ {user_mention} trágár vagy sértő beszédet használt. "
-                "A mute nem sikerült — ellenőrizd, hogy a bot admin-e és van-e joga korlátozni a tagokat."
-            ),
+            f"⚠️ {user_mention} {random_message}"
         )
         return
 
-    await safe_warn_user(chat_id, user_id, reason_text)
+    await safe_warn_user(bot, chat_id, user_id, reason_text)
 
 
 async def process_update_data(update_data: dict):
+    bot = create_bot()
+
     message = update_data.get("message")
     if not message:
         logger.info("Nem message típusú update, kihagyva.")
@@ -471,21 +481,21 @@ async def process_update_data(update_data: dict):
     text = message.get("text") or ""
 
     if message.get("new_chat_members"):
-        await handle_new_members(message)
+        await handle_new_members(bot, message)
 
     if text == "/start":
-        await handle_start(chat_id)
+        await handle_start(bot, chat_id)
         return
 
     if text == "/help":
-        await handle_help(chat_id)
+        await handle_help(bot, chat_id)
         return
 
     if text == "/offenses":
-        await handle_offenses(chat_id, user_id)
+        await handle_offenses(bot, chat_id, user_id)
         return
 
-    await handle_moderation(message)
+    await handle_moderation(bot, message)
 
 
 @flask_app.get("/")
