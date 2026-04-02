@@ -4,9 +4,10 @@ import os
 import re
 import asyncio
 import random
+import threading
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask, request
+from flask import Flask, request, abort
 from telegram import Update, ChatPermissions
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -130,7 +131,7 @@ WARNING_MESSAGES = [
     "Ezért nem jár újratöltés.",
     "Most inkább tedd le a korsót egy percre.",
     "Ez most olyan volt, mint a langyos sör.",
-    "A sörbe rakd az arcodat, ne más arcába.", 
+    "A sörbe rakd az arcodat, ne más arcába.",
     "Ez most nem ütött, inkább csak fröccsent.",
     "A hangulat jó volt, amíg ezt be nem dobtad.",
     "Na ezt most kiöntjük a pult mögött.",
@@ -138,7 +139,7 @@ WARNING_MESSAGES = [
     "Ez most nem a legjobb házi főzet.",
     "A törzsvendégek ezért már morognak.",
     "Ez most nem tapsot kapott, csak csendet.",
-    "Inkább még egy sör, kevesebb szó.", 
+    "Inkább még egy sör, kevesebb szó.",
     "Ez most nem ülte meg a hangulatot.",
     "Kicsit túlerjedt ez a mondat.",
     "Ez most lecsúszott, de nem jól.",
@@ -163,6 +164,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {"offenses": {}, "last_warning_ts": {}}
@@ -172,11 +174,14 @@ def load_data():
     except Exception:
         return {"offenses": {}, "last_warning_ts": {}}
 
+
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+
 DB = load_data()
+
 
 def get_nested(d, *keys, default=None):
     cur = d
@@ -186,6 +191,7 @@ def get_nested(d, *keys, default=None):
         cur = cur[key]
     return cur
 
+
 def set_offense(chat_id: int, user_id: int, value: int):
     chat_key = str(chat_id)
     user_key = str(user_id)
@@ -194,8 +200,10 @@ def set_offense(chat_id: int, user_id: int, value: int):
     DB["offenses"][chat_key][user_key] = value
     save_data(DB)
 
+
 def get_offense(chat_id: int, user_id: int) -> int:
     return int(get_nested(DB, "offenses", str(chat_id), str(user_id), default=0) or 0)
+
 
 def increment_offense(chat_id: int, user_id: int) -> int:
     current = get_offense(chat_id, user_id)
@@ -203,8 +211,10 @@ def increment_offense(chat_id: int, user_id: int) -> int:
     set_offense(chat_id, user_id, current)
     return current
 
+
 def get_last_warning_ts(chat_id: int, user_id: int) -> int:
     return int(get_nested(DB, "last_warning_ts", str(chat_id), str(user_id), default=0) or 0)
+
 
 def set_last_warning_ts(chat_id: int, user_id: int, ts: int):
     chat_key = str(chat_id)
@@ -214,12 +224,14 @@ def set_last_warning_ts(chat_id: int, user_id: int, ts: int):
     DB["last_warning_ts"][chat_key][user_key] = ts
     save_data(DB)
 
+
 LEET_MAP = {
     "0": "o", "1": "i", "!": "i", "|": "i", "3": "e", "4": "a",
     "@": "a", "$": "s", "5": "s", "7": "t", "+": "t", "8": "b", "9": "g",
 }
 
 SEPARATOR_CHARS_PATTERN = r"[\s\.\,\-\_\*\~\`\:\;\(\)\[\]\{\}\\/]+"
+
 
 def strip_accents_hu(text: str) -> str:
     replacements = {
@@ -231,11 +243,14 @@ def strip_accents_hu(text: str) -> str:
         text = text.replace(src, dst)
     return text
 
+
 def leet_normalize(text: str) -> str:
     return "".join(LEET_MAP.get(ch, ch) for ch in text)
 
+
 def collapse_repeated_chars(text: str) -> str:
     return re.sub(r"(.)\1{2,}", r"\1", text)
+
 
 def normalize_text_variants(text: str) -> list[str]:
     base = strip_accents_hu(text)
@@ -247,6 +262,7 @@ def normalize_text_variants(text: str) -> list[str]:
 
     return list({base, compact, alnum_only})
 
+
 def contains_banned_content(text: str) -> str | None:
     variants = normalize_text_variants(text)
     for bad in BANNED_PATTERNS:
@@ -256,6 +272,7 @@ def contains_banned_content(text: str) -> str | None:
                 return bad
     return None
 
+
 async def is_user_admin(chat, user_id: int) -> bool:
     try:
         member = await chat.get_member(user_id)
@@ -263,12 +280,14 @@ async def is_user_admin(chat, user_id: int) -> bool:
     except Exception:
         return False
 
+
 async def delete_later(message, delay: int):
     try:
         await asyncio.sleep(delay)
         await message.delete()
     except Exception:
         pass
+
 
 async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     if not update.effective_chat or not update.effective_user:
@@ -294,12 +313,14 @@ async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
             "🍺 Kocsma moderátor bot aktív.\n"
             "Figyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
         )
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
@@ -309,11 +330,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/offenses - megmutatja a saját szabálysértéseid számát"
         )
 
+
 async def offenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_chat or not update.effective_user:
         return
     count = get_offense(update.effective_chat.id, update.effective_user.id)
     await update.message.reply_text(f"Eddigi szabálysértéseid száma: {count}")
+
 
 async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.new_chat_members:
@@ -330,6 +353,7 @@ async def welcome_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception:
             logger.exception("Nem sikerült üdvözlő üzenetet küldeni.")
+
 
 async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_chat or not update.effective_user:
@@ -422,6 +446,7 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await safe_warn_user(update, context, reason_text)
 
+
 def build_application() -> Application:
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -434,40 +459,56 @@ def build_application() -> Application:
 
     return app
 
+
 telegram_app = build_application()
 flask_app = Flask(__name__)
+
+telegram_loop = asyncio.new_event_loop()
+telegram_ready = False
+
+
+def _run_loop_forever():
+    asyncio.set_event_loop(telegram_loop)
+    telegram_loop.run_forever()
+
+
+loop_thread = threading.Thread(target=_run_loop_forever, daemon=True)
+loop_thread.start()
+
+
+async def _telegram_startup():
+    await telegram_app.initialize()
+    await telegram_app.start()
+
+
+startup_future = asyncio.run_coroutine_threadsafe(_telegram_startup(), telegram_loop)
+startup_future.result()
+telegram_ready = True
+
 
 @flask_app.get("/")
 def healthcheck():
     return "OK", 200
 
+
 @flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
 def webhook():
-    update_data = request.get_json(force=True)
+    if not telegram_ready:
+        abort(503)
+
+    update_data = request.get_json(silent=True)
+    if not update_data:
+        abort(400)
+
     update = Update.de_json(update_data, telegram_app.bot)
-
-    async def process():
-        await telegram_app.process_update(update)
-
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(process())
-    finally:
-        loop.close()
+    future = asyncio.run_coroutine_threadsafe(
+        telegram_app.process_update(update),
+        telegram_loop,
+    )
+    future.result()
 
     return "ok", 200
 
-async def startup():
-    await telegram_app.initialize()
-    await telegram_app.start()
-
-def main():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(startup())
-
-    print("Webhook bot elindult...")
-    flask_app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
-    main()
+    flask_app.run(host="0.0.0.0", port=PORT)
