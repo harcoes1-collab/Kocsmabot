@@ -4,12 +4,14 @@ import os
 import re
 import asyncio
 import random
-import threading
 import html
+import threading
+from queue import Queue
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, request, abort
 from telegram import Bot, ChatPermissions
+from telegram.request import HTTPXRequest
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
@@ -18,8 +20,18 @@ PORT = int(os.getenv("PORT", "8000"))
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
 
-bot = Bot(BOT_TOKEN)
+# Nagyobb pool, hogy ne fogyjon el azonnal
+request_client = HTTPXRequest(
+    connection_pool_size=20,
+    pool_timeout=30.0,
+    read_timeout=30.0,
+    write_timeout=30.0,
+    connect_timeout=30.0,
+)
+
+bot = Bot(BOT_TOKEN, request=request_client)
 flask_app = Flask(__name__)
+update_queue = Queue()
 
 DATA_FILE = "bot_data.json"
 
@@ -283,15 +295,6 @@ async def is_user_admin(chat_id: int, user_id: int) -> bool:
         return False
 
 
-def run_in_background(coro):
-    def runner():
-        try:
-            asyncio.run(coro)
-        except Exception:
-            logger.exception("Háttérfeladat hiba")
-    threading.Thread(target=runner, daemon=True).start()
-
-
 async def delete_message_later(chat_id: int, message_id: int, delay: int):
     try:
         await asyncio.sleep(delay)
@@ -316,7 +319,8 @@ async def safe_warn_user(chat_id: int, user_id: int, text: str):
             text=text,
             parse_mode="HTML",
         )
-        run_in_background(delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS))
+        # a késleltetett törlést ugyanabban az event loopban intézzük
+        asyncio.create_task(delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS))
         logger.info("safe_warn_user: figyelmeztetés elküldve")
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
@@ -499,6 +503,20 @@ async def process_update_data(update_data: dict):
     await handle_moderation(message)
 
 
+def worker():
+    while True:
+        update_data = update_queue.get()
+        try:
+            asyncio.run(process_update_data(update_data))
+        except Exception:
+            logger.exception("Worker hiba update feldolgozás közben")
+        finally:
+            update_queue.task_done()
+
+
+threading.Thread(target=worker, daemon=True).start()
+
+
 @flask_app.get("/")
 def healthcheck():
     return "OK", 200
@@ -517,7 +535,7 @@ def webhook():
         abort(400)
 
     logger.info("Webhook update megérkezett: %s", update_data)
-    run_in_background(process_update_data(update_data))
+    update_queue.put(update_data)
     return "ok", 200
 
 
