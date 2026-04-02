@@ -183,25 +183,42 @@ WARNING_MESSAGES = [
 WARNING_COOLDOWN_SECONDS = 5
 
 EXTREME_PATTERNS = {
-    "kurvanyád", "kurva anyád", "anyád picsája", "anyad picsaja",
-    "dögölj meg", "dogolj meg", "csicskageci", "tetves kurva",
-    "büdös cigány", "budos cigany", "rohadt cigány", "rohadt roman",
-    "tetves cigány", "tetves zsido",
-    "koszos migráns", "koszos arab", "csicska", "csicskagyász"
+    "kurvanyád", "kurva anyád",
+    "anyád picsája", "anyad picsaja",
+    "dögölj meg", "dogolj meg",
+    "tetves kurva",
+    "csicskageci", "halj meg", "drogos geci"
 }
 
 HIGH_PATTERNS = {
-    "geci", "gecifej", "geciláda", "faszfej", "faszkalap", "balfasz",
-    "köcsög", "kocsog", "nyomorék", "nyomorek", "rohadék", "rohadek",
-    "hülyegyökér", "hulyegyoker", "szellemi fogyatékos", "degenerált",
-    "degeneralt", "retardált", "retardalt"
+    "geci", "gecifej", "geciláda",
+    "faszfej", "faszkalap", "balfasz",
+    "köcsög", "kocsog",
+    "rohadék", "rohadek",
+    "hülyegyökér", "hulyegyoker",
+    "büdös cigány", "budos cigany",
+    "rohadt cigány", "rohadt roman",
+    "tetves cigány", "tetves zsido",
+    "koszos migráns", "koszos arab"
 }
 
 MEDIUM_PATTERNS = {
-    "fasz", "fasznak", "faszom", "kurva", "bazdmeg", "baszdmeg",
-    "hülye", "hulye", "idióta", "idiota", "buzi", "barom", "seggfej",
-    "seggnyaló", "majom", "patkány", "patkany", "féreg", "fereg",
-    "undorító", "undorito", "hányadék", "hanyadek"
+    "fasz", "fasznak", "faszom",
+    "kurva",
+    "bazdmeg", "baszdmeg",
+    "hülye", "hulye",
+    "idióta", "idiota",
+    "buzi",
+    "barom",
+    "seggfej", "seggnyaló",
+    "majom",
+    "patkány", "patkany",
+    "féreg", "fereg",
+    "hányadék", "hanyadek"
+    "retardált", "retardalt",
+    "csicska", "csicskagyász"
+    "szellemi fogyatékos"
+    "nyomorék", "nyomorek"
 }
 
 TARGETED_HINTS = (
@@ -392,9 +409,8 @@ def find_banned_matches(text: str) -> list[str]:
             if bad_norm in variant or bad_compact in variant:
                 found.add(bad)
                 break
-
+                
     return sorted(found)
-
 
 def classify_severity(text: str, matches: list[str], message: dict) -> int:
     if not matches:
@@ -402,31 +418,39 @@ def classify_severity(text: str, matches: list[str], message: dict) -> int:
 
     normalized_text = strip_accents_hu(leet_normalize(collapse_repeated_chars(text)))
     unique_count = len(set(matches))
+
+    is_targeted = (
+        any(hint in normalized_text for hint in TARGETED_HINTS)
+        or bool(message.get("reply_to_message"))
+    )
+
     score = 1
 
     if any(m in EXTREME_PATTERNS for m in matches):
-        score = max(score, 4)
+        score = 4
     elif any(m in HIGH_PATTERNS for m in matches):
-        score = max(score, 3)
+        score = 3
     elif any(m in MEDIUM_PATTERNS for m in matches):
-        score = max(score, 2)
+        score = 2
 
     if unique_count >= 3:
         score = max(score, 4)
     elif unique_count == 2:
         score = max(score, 3)
 
-    if message.get("reply_to_message"):
-        score = max(score, 3)
+    if is_targeted:
+        if score < 3:
+            score += 1
+    else:
+        if score >= 3:
+            score = 1
+        elif score == 2:
+            score = 1
 
-    if any(hint in normalized_text for hint in TARGETED_HINTS):
-        score = max(score, 3)
-
-    if len(text) <= 12 and unique_count == 1 and score < 2:
-        score = 1
+    if len(text.strip()) <= 12 and unique_count == 1 and is_targeted and score > 2:
+        score = 2
 
     return min(score, 4)
-
 
 def mention_html(user_id: int, first_name: str) -> str:
     safe_name = html.escape(first_name or "Felhasználó")
