@@ -15,19 +15,22 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
 PORT = int(os.getenv("PORT", "8000"))
 
+LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-5015553528"))
+
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
 
 flask_app = Flask(__name__)
 
 DATA_FILE = "bot_data.json"
-
 DELETE_BAD_MESSAGES = True
 
-FIRST_MUTE_MINUTES = 5
-SECOND_MUTE_MINUTES = 10
-THIRD_MUTE_MINUTES = 30
-FOURTH_PLUS_MUTE_MINUTES = 60
+SEVERITY_MUTE_MINUTES = {
+    1: 5,
+    2: 10,
+    3: 30,
+    4: 60,
+}
 
 WELCOME_MESSAGE = (
     "🍻 <b>Üdvözlünk szerény kis kocsmánkban!</b>\n"
@@ -97,55 +100,118 @@ WARNING_MESSAGES = [
     "Állj meg egy pillanatra, ez már sok.",
     "Ez nem az a hely, ahol így beszélünk.",
     "Ez most erős volt, inkább pihenj egyet.",
-    "Nem kell itt a feszkó, chill egy kicsit.",
-    "Ez a hangnem nem játszik itt.",
+    "Gyújts inkább rá haver.",
+    "Tekerj inkább egy vicces cigit..",
     "Kulturáltabban is megy, próbáld úgy.",
     "Ez most mínusz egy kör.",
     "Kicsit elszabadult a nyelved.",
     "Nem kell a dráma, maradjunk normálisak.",
     "Oltsd el magad sürgős jelleggel!.",
     "Higgadj le, aztán folytathatjuk.",
-    "Ez már piros lap.",
+    "Belefőzzünk a sörbe?",
     "Ez most túl lett tolva, vegyél vissza.",
     "Nem ide való ez a stílus.",
     "Kérlek maradj tiszteletteljes.",
     "Ez most nem fér bele, próbáld újra.",
     "Figyelj a hangnemre.",
     "Ez a viselkedés nem oké itt.",
-    "Álljunk meg egy szóra, ez így nem jó.",
+    "Na mivan? Pálinka akarsz lenni? Csak mert megoldható ha sokat káromkodsz..",
     "Maradjunk inkább normális keretek között.",
     "Próbálj meg kulturáltabban fogalmazni.",
     "Na ezt most visszaküldjük a csap alá.",
     "Ez most nem egy dicsőséges kör volt.",
-    "A csapos már néz rád furán..",
+    "A csapos már furán néz rád..",
     "Ezért nem jár újratöltés.",
     "Most inkább tedd le a korsót egy percre.",
     "Ez most olyan volt, mint a langyos sör.",
     "A sörbe rakd az arcodat, ne más arcába.",
-    "Ez most nem ütött, inkább csak fröccsent.",
+    "Néz már! A kidobó PONT téged keres..",
     "A hangulat jó volt, amíg ezt be nem dobtad.",
     "Na ezt most kiöntjük a pult mögött.",
     "Kicsit savanyú lett ez a kör.",
     "Ez most nem a legjobb házi főzet.",
     "A törzsvendégek ezért már morognak.",
-    "Ez most nem tapsot kapott, csak csendet.",
+    "Lőre, lőre előre! Még egy és lecsücsülsz a földre!",
     "Inkább még egy sör, kevesebb szó.",
     "Ez most nem ülte meg a hangulatot.",
-    "Kicsit túlerjedt ez a mondat.",
+    "Lépjél csak ki egy cigire!",
     "Ez most lecsúszott, de nem jól.",
     "A csapból sem folyik ennyi feszültség.",
     "Na ebből nem kér még egy kört senki.",
     "Ez most inkább volt melléöntés.",
     "Ez most nem volt egy nyerő rendelés.",
-    "A pult ezt most nem jegyzi fel jóként.",
-    "Ez most inkább volt zajos, mint okos.",
-    "Kicsit túl lett húzva a csap.",
+    "A pult ezt most nem jegyzi fel jónak.",
+    "Mondtuk nincs hitelre ivászat! Pusztulj dolgozni!",
+    "Lőre, lőre előre! Te meg koccansz a padló kövére!",
     "Ez most nem a baráti kör kategória.",
     "Ezt most inkább hagyjuk ülepedni.",
     "Na ezt most elvitte a huzat a kocsmából."
+    "Ezt most leöblítjük egy nagy csönddel."
+    "Még egy ilyen, és a padló lesz a partnered."
+    "Kocc, és már csúszol is kifelé."
+    "Ez most olyan volt, mint a kiömlött sör – kár érte."
+    "A kidobó már bemelegít rád."
+    "Ez most egy lépés a kijárat felé."
+    "Ez most már ajtóközeli viselkedés."
+    "A következő köröd lehet kint lesz."
+    "Ne ugass, hanem igyál csendben."
+    "Ne rázd már a korsót, kifröccsen a hangulat."
+    "Ezt most egy húzásra lenyeljük és elfelejtjük."
+    "Kicsit túltoltad a szeszt a mondatba."
+    "Ez után inkább víz kéne, nem több szó."
+    "A pult ezt most nem szolgálja ki."
+    "Ha még egy ilyet töltesz ki, borul az asztal."
+    "Kicsit sok lett benned a bátorság folyékony formában."
+    "Most inkább vizet kérj, ne szót."
+    "Ez már nem részegség, ez probléma."
+    "Ne rázd már a korsót, nem habverseny van."
+    "Kicsit túltoltad a komlót a dumába."
+    "Ez most olyan, mint a felmelegedett dobozos."
+    "Kicsit túlerjedt a stílusod."
+    "Nem kell mindenből nagyfröccsöt csinálni."
+    "Kicsit sok lett benned a házi főzet."
+    "Ne keverd túl, nem koktélverseny van."
+    "Kicsit túl sok lett a százalék benned."
+    "Ez most tiszta koccintós szint."
+    "Ez most tipik olcsó kör volt."
+    "Ezt még a koccintós is kikérné magának."
+    "Ne keverd a sört a pálinkával, meg a dumát a balhéval."
+    "Kicsit túl lett keverve a pia és az ego."
+    "Ne csinálj ebből tömény problémát."
 ]
 
 WARNING_COOLDOWN_SECONDS = 5
+
+EXTREME_PATTERNS = {
+    "kurvanyád", "kurva anyád", "anyád picsája", "anyad picsaja",
+    "dögölj meg", "dogolj meg", "csicskageci", "tetves kurva",
+    "büdös cigány", "budos cigany", "rohadt cigány", "rohadt roman",
+    "tetves cigány", "tetves zsido",
+    "koszos migráns", "koszos arab", "csicska", "csicskagyász"
+}
+
+HIGH_PATTERNS = {
+    "geci", "gecifej", "geciláda", "faszfej", "faszkalap", "balfasz",
+    "köcsög", "kocsog", "nyomorék", "nyomorek", "rohadék", "rohadek",
+    "hülyegyökér", "hulyegyoker", "szellemi fogyatékos", "degenerált",
+    "degeneralt", "retardált", "retardalt"
+}
+
+MEDIUM_PATTERNS = {
+    "fasz", "fasznak", "faszom", "kurva", "bazdmeg", "baszdmeg",
+    "hülye", "hulye", "idióta", "idiota", "buzi", "barom", "seggfej",
+    "seggnyaló", "majom", "patkány", "patkany", "féreg", "fereg",
+    "undorító", "undorito", "hányadék", "hanyadek"
+}
+
+TARGETED_HINTS = (
+    "te ", "neked", "téged", "veled", "rólad", "rolad", "teged",
+    "anyád", "anyad", "nektek", "ti ","te vagy", "te egy", "te egy kibaszott",
+    "te ilyen", "te olyan",
+    "neked mondom", "rád értettem",
+    "miattad", "te miattad",
+    "fogd be", "hallgass", "@"
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -168,12 +234,24 @@ def create_bot() -> Bot:
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {"offenses": {}, "last_warning_ts": {}}
+        return {
+            "offenses": {},
+            "last_warning_ts": {},
+            "stats": {},
+        }
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            data.setdefault("offenses", {})
+            data.setdefault("last_warning_ts", {})
+            data.setdefault("stats", {})
+            return data
     except Exception:
-        return {"offenses": {}, "last_warning_ts": {}}
+        return {
+            "offenses": {},
+            "last_warning_ts": {},
+            "stats": {},
+        }
 
 
 def save_data(data):
@@ -207,8 +285,7 @@ def get_offense(chat_id: int, user_id: int) -> int:
 
 
 def increment_offense(chat_id: int, user_id: int) -> int:
-    current = get_offense(chat_id, user_id)
-    current += 1
+    current = get_offense(chat_id, user_id) + 1
     set_offense(chat_id, user_id, current)
     return current
 
@@ -224,6 +301,45 @@ def set_last_warning_ts(chat_id: int, user_id: int, ts: int):
     DB["last_warning_ts"].setdefault(chat_key, {})
     DB["last_warning_ts"][chat_key][user_key] = ts
     save_data(DB)
+
+
+def get_user_stats(chat_id: int, user_id: int) -> dict:
+    chat_key = str(chat_id)
+    user_key = str(user_id)
+    DB.setdefault("stats", {})
+    DB["stats"].setdefault(chat_key, {})
+    DB["stats"][chat_key].setdefault(user_key, {
+        "offense_count": 0,
+        "severity_counts": {"1": 0, "2": 0, "3": 0, "4": 0},
+        "last_offense_ts": 0,
+        "last_message": "",
+        "display_name": "",
+    })
+    stats = DB["stats"][chat_key][user_key]
+    stats.setdefault("offense_count", 0)
+    stats.setdefault("severity_counts", {"1": 0, "2": 0, "3": 0, "4": 0})
+    for key in ("1", "2", "3", "4"):
+        stats["severity_counts"].setdefault(key, 0)
+    stats.setdefault("last_offense_ts", 0)
+    stats.setdefault("last_message", "")
+    stats.setdefault("display_name", "")
+    return stats
+
+
+def update_user_stats(chat_id: int, user_id: int, display_name: str, severity: int, text: str):
+    stats = get_user_stats(chat_id, user_id)
+    stats["offense_count"] += 1
+    stats["severity_counts"][str(severity)] += 1
+    stats["last_offense_ts"] = int(datetime.now(timezone.utc).timestamp())
+    stats["last_message"] = text[:300]
+    stats["display_name"] = display_name
+    save_data(DB)
+
+
+def format_ts(ts: int) -> str:
+    if not ts:
+        return "nincs adat"
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 LEET_MAP = {
@@ -259,19 +375,57 @@ def normalize_text_variants(text: str) -> list[str]:
     base = collapse_repeated_chars(base)
 
     compact = re.sub(SEPARATOR_CHARS_PATTERN, "", base)
-    alnum_only = re.sub(r"[^a-z0-9]", "", base)
+    alnum_only = re.sub(r"[^a-z0-9\s]", "", base)
+    collapsed_spaces = re.sub(r"\s+", " ", alnum_only).strip()
 
-    return list({base, compact, alnum_only})
+    return list({base, compact, alnum_only, collapsed_spaces})
 
 
-def contains_banned_content(text: str) -> str | None:
+def find_banned_matches(text: str) -> list[str]:
     variants = normalize_text_variants(text)
+    found = set()
+
     for bad in BANNED_PATTERNS:
         bad_norm = strip_accents_hu(bad)
+        bad_compact = re.sub(SEPARATOR_CHARS_PATTERN, "", bad_norm)
         for variant in variants:
-            if bad_norm in variant:
-                return bad
-    return None
+            if bad_norm in variant or bad_compact in variant:
+                found.add(bad)
+                break
+
+    return sorted(found)
+
+
+def classify_severity(text: str, matches: list[str], message: dict) -> int:
+    if not matches:
+        return 0
+
+    normalized_text = strip_accents_hu(leet_normalize(collapse_repeated_chars(text)))
+    unique_count = len(set(matches))
+    score = 1
+
+    if any(m in EXTREME_PATTERNS for m in matches):
+        score = max(score, 4)
+    elif any(m in HIGH_PATTERNS for m in matches):
+        score = max(score, 3)
+    elif any(m in MEDIUM_PATTERNS for m in matches):
+        score = max(score, 2)
+
+    if unique_count >= 3:
+        score = max(score, 4)
+    elif unique_count == 2:
+        score = max(score, 3)
+
+    if message.get("reply_to_message"):
+        score = max(score, 3)
+
+    if any(hint in normalized_text for hint in TARGETED_HINTS):
+        score = max(score, 3)
+
+    if len(text) <= 12 and unique_count == 1 and score < 2:
+        score = 1
+
+    return min(score, 4)
 
 
 def mention_html(user_id: int, first_name: str) -> str:
@@ -279,14 +433,24 @@ def mention_html(user_id: int, first_name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
 
 
-def get_mute_minutes(offense_count: int) -> int:
-    if offense_count == 1:
-        return FIRST_MUTE_MINUTES
-    if offense_count == 2:
-        return SECOND_MUTE_MINUTES
-    if offense_count == 3:
-        return THIRD_MUTE_MINUTES
-    return FOURTH_PLUS_MUTE_MINUTES
+def get_mute_minutes(severity: int) -> int:
+    return SEVERITY_MUTE_MINUTES.get(severity, 5)
+
+
+def severity_label(severity: int) -> str:
+    return {
+        1: "enyhe",
+        2: "közepes",
+        3: "durva",
+        4: "extrém",
+    }.get(severity, "ismeretlen")
+
+
+def normalize_command(text: str) -> str:
+    cmd = (text or "").strip().split()[0].lower()
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
+    return cmd
 
 
 async def is_user_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
@@ -315,25 +479,108 @@ async def safe_warn_user(bot: Bot, chat_id: int, user_id: int, text: str):
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
 
+async def send_log(bot: Bot, text: str):
+    try:
+        await bot.send_message(chat_id=LOG_CHAT_ID, text=text, parse_mode="HTML")
+    except Exception:
+        logger.exception("Nem sikerült logot küldeni a log channelbe.")
+
+
 async def handle_start(bot: Bot, chat_id: int):
     logger.info("start_command lefutott")
     await bot.send_message(
         chat_id=chat_id,
-        text="🍺 Kocsma moderátor bot aktív.\nFigyelem a trágár és sértő beszédet, szükség esetén törlök és némítok."
+        text="🍺 Kocsma moderátor bot aktív."
     )
     logger.info("start_command: válasz elküldve")
-
-
-async def handle_help(bot: Bot, chat_id: int):
-    await bot.send_message(
-        chat_id=chat_id,
-        text="/start - bot indítása\n/help - segítség\n/offenses - megmutatja a saját szabálysértéseid számát"
-    )
 
 
 async def handle_offenses(bot: Bot, chat_id: int, user_id: int):
     count = get_offense(chat_id, user_id)
     await bot.send_message(chat_id=chat_id, text=f"Eddigi szabálysértéseid száma: {count}")
+
+
+async def handle_mystats(bot: Bot, chat_id: int, user_id: int):
+    stats = get_user_stats(chat_id, user_id)
+    text = (
+        f"📊 Saját statisztikád:\n"
+        f"Összes offense: {stats['offense_count']}\n"
+        f"1-es szint: {stats['severity_counts']['1']}\n"
+        f"2-es szint: {stats['severity_counts']['2']}\n"
+        f"3-as szint: {stats['severity_counts']['3']}\n"
+        f"4-es szint: {stats['severity_counts']['4']}\n"
+        f"Utolsó offense: {format_ts(stats['last_offense_ts'])}"
+    )
+    await bot.send_message(chat_id=chat_id, text=text)
+
+
+async def handle_topoffenders(bot: Bot, chat_id: int):
+    chat_stats = get_nested(DB, "stats", str(chat_id), default={}) or {}
+    if not chat_stats:
+        await bot.send_message(chat_id=chat_id, text="Még nincs statisztika ebben a chatben.")
+        return
+
+    rows = []
+    for user_id, stats in chat_stats.items():
+        rows.append((
+            stats.get("display_name") or f"user {user_id}",
+            stats.get("offense_count", 0),
+            user_id
+        ))
+
+    rows.sort(key=lambda x: x[1], reverse=True)
+    top_rows = rows[:10]
+
+    lines = ["🏆 Top szabálysértők:"]
+    for idx, (name, count, user_id) in enumerate(top_rows, start=1):
+        lines.append(f"{idx}. {name} — {count} offense (ID: {user_id})")
+
+    await bot.send_message(chat_id=chat_id, text="\n".join(lines))
+
+
+async def handle_chatstats(bot: Bot, chat_id: int):
+    chat_stats = get_nested(DB, "stats", str(chat_id), default={}) or {}
+    if not chat_stats:
+        await bot.send_message(chat_id=chat_id, text="Még nincs statisztika ebben a chatben.")
+        return
+
+    total_offenses = 0
+    sev = {"1": 0, "2": 0, "3": 0, "4": 0}
+    unique_users = 0
+
+    for stats in chat_stats.values():
+        if stats.get("offense_count", 0) > 0:
+            unique_users += 1
+        total_offenses += stats.get("offense_count", 0)
+        for key in ("1", "2", "3", "4"):
+            sev[key] += stats.get("severity_counts", {}).get(key, 0)
+
+    text = (
+        f"📈 Chat statisztika:\n"
+        f"Érintett userek: {unique_users}\n"
+        f"Összes offense: {total_offenses}\n"
+        f"1-es szint: {sev['1']}\n"
+        f"2-es szint: {sev['2']}\n"
+        f"3-as szint: {sev['3']}\n"
+        f"4-es szint: {sev['4']}"
+    )
+    await bot.send_message(chat_id=chat_id, text=text)
+
+
+async def handle_userstats(bot: Bot, chat_id: int, target_user_id: int):
+    stats = get_user_stats(chat_id, target_user_id)
+    text = (
+        f"📋 User stat ({target_user_id}):\n"
+        f"Név: {stats.get('display_name') or 'ismeretlen'}\n"
+        f"Összes offense: {stats['offense_count']}\n"
+        f"1-es szint: {stats['severity_counts']['1']}\n"
+        f"2-es szint: {stats['severity_counts']['2']}\n"
+        f"3-as szint: {stats['severity_counts']['3']}\n"
+        f"4-es szint: {stats['severity_counts']['4']}\n"
+        f"Utolsó offense: {format_ts(stats['last_offense_ts'])}\n"
+        f"Utolsó talált üzenet: {stats.get('last_message') or 'nincs adat'}"
+    )
+    await bot.send_message(chat_id=chat_id, text=text)
 
 
 async def handle_new_members(bot: Bot, message: dict):
@@ -361,6 +608,7 @@ async def handle_moderation(bot: Bot, message: dict):
 
     chat_id = chat.get("id")
     chat_type = chat.get("type")
+    chat_title = chat.get("title", "Ismeretlen chat")
     user_id = user.get("id")
     first_name = user.get("first_name", "Felhasználó")
     message_id = message.get("message_id")
@@ -379,22 +627,40 @@ async def handle_moderation(bot: Bot, message: dict):
     if not text.strip():
         return
 
-    found = contains_banned_content(text)
-    logger.info("moderate_message: talált tiltott minta = %r", found)
+    matches = find_banned_matches(text)
+    logger.info("moderate_message: talált tiltott minták = %r", matches)
 
-    if not found:
+    if not matches:
         return
 
+    severity = classify_severity(text, matches, message)
+    mute_minutes = get_mute_minutes(severity)
     user_mention = mention_html(user_id, first_name)
+    random_message = random.choice(WARNING_MESSAGES)
+
+    update_user_stats(chat_id, user_id, first_name, severity, text)
+    offense_count = increment_offense(chat_id, user_id)
+
+    log_text = (
+        f"🧾 <b>Káromkodás log</b>\n"
+        f"Chat: {html.escape(chat_title)}\n"
+        f"User: {mention_html(user_id, first_name)}\n"
+        f"User ID: <code>{user_id}</code>\n"
+        f"Offense #: {offense_count}\n"
+        f"Szint: <b>{severity}</b> ({severity_label(severity)})\n"
+        f"Mute: <b>{mute_minutes} perc</b>\n"
+        f"Találatok: {html.escape(', '.join(matches))}\n"
+        f"Üzenet: <code>{html.escape(text[:800])}</code>"
+    )
 
     if await is_user_admin(bot, chat_id, user_id):
-        random_message = random.choice(WARNING_MESSAGES)
         await safe_warn_user(
             bot,
             chat_id,
             user_id,
             f"🍺 {user_mention} {random_message}"
         )
+        await send_log(bot, log_text + "\nMűvelet: <b>admin warning</b>")
         logger.info("moderate_message: admin warning elküldve")
         return
 
@@ -405,28 +671,18 @@ async def handle_moderation(bot: Bot, message: dict):
         except Exception:
             logger.exception("Nem sikerült törölni a szabályszegő üzenetet.")
 
-    offense_count = increment_offense(chat_id, user_id)
-    random_message = random.choice(WARNING_MESSAGES)
-    mute_minutes = get_mute_minutes(offense_count)
-
     if chat_type != "supergroup":
         await safe_warn_user(
             bot,
             chat_id,
             user_id,
-            f"⚠️ {user_mention} {random_message}"
+            f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc lenne a mute, de ez a chat nem supergroup."
         )
+        await send_log(bot, log_text + "\nMűvelet: <b>warning only (nem supergroup)</b>")
         logger.info("moderate_message: nem supergroup, mute kihagyva")
         return
 
-    if offense_count == 1:
-        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc pihenő."
-    elif offense_count == 2:
-        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc csend."
-    elif offense_count == 3:
-        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc mute."
-    else:
-        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc mute."
+    reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc mute."
 
     until_date = datetime.now(timezone.utc) + timedelta(minutes=mute_minutes)
 
@@ -461,9 +717,11 @@ async def handle_moderation(bot: Bot, message: dict):
             user_id,
             f"⚠️ {user_mention} {random_message}"
         )
+        await send_log(bot, log_text + "\nMűvelet: <b>warning, mute sikertelen</b>")
         return
 
     await safe_warn_user(bot, chat_id, user_id, reason_text)
+    await send_log(bot, log_text + "\nMűvelet: <b>delete + mute + warning</b>")
 
 
 async def process_update_data(update_data: dict):
@@ -479,21 +737,47 @@ async def process_update_data(update_data: dict):
     chat_id = chat.get("id")
     user_id = user.get("id")
     text = message.get("text") or ""
+    command = normalize_command(text)
 
     if message.get("new_chat_members"):
         await handle_new_members(bot, message)
 
-    if text == "/start":
+    if command == "/start":
         await handle_start(bot, chat_id)
         return
 
-    if text == "/help":
-        await handle_help(bot, chat_id)
-        return
-
-    if text == "/offenses":
+    if command == "/offenses":
         await handle_offenses(bot, chat_id, user_id)
         return
+
+    if command == "/mystats":
+        await handle_mystats(bot, chat_id, user_id)
+        return
+
+    if command in {"/topoffenders", "/chatstats", "/userstats"}:
+        if not await is_user_admin(bot, chat_id, user_id):
+            return
+
+        if command == "/topoffenders":
+            await handle_topoffenders(bot, chat_id)
+            return
+
+        if command == "/chatstats":
+            await handle_chatstats(bot, chat_id)
+            return
+
+        if command == "/userstats":
+            parts = text.strip().split(maxsplit=1)
+            if len(parts) < 2:
+                await bot.send_message(chat_id=chat_id, text="Használat: /userstats <id>")
+                return
+            try:
+                target_user_id = int(parts[1].strip())
+            except ValueError:
+                await bot.send_message(chat_id=chat_id, text="Érvénytelen user ID.")
+                return
+            await handle_userstats(bot, chat_id, target_user_id)
+            return
 
     await handle_moderation(bot, message)
 
