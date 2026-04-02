@@ -145,38 +145,38 @@ WARNING_MESSAGES = [
     "Lőre, lőre előre! Te meg koccansz a padló kövére!",
     "Ez most nem a baráti kör kategória.",
     "Ezt most inkább hagyjuk ülepedni.",
-    "Na ezt most elvitte a huzat a kocsmából."
-    "Ezt most leöblítjük egy nagy csönddel."
-    "Még egy ilyen, és a padló lesz a partnered."
-    "Kocc, és már csúszol is kifelé."
-    "Ez most olyan volt, mint a kiömlött sör – kár érte."
-    "A kidobó már bemelegít rád."
-    "Ez most egy lépés a kijárat felé."
-    "Ez most már ajtóközeli viselkedés."
-    "A következő köröd lehet kint lesz."
-    "Ne ugass, hanem igyál csendben."
-    "Ne rázd már a korsót, kifröccsen a hangulat."
-    "Ezt most egy húzásra lenyeljük és elfelejtjük."
-    "Kicsit túltoltad a szeszt a mondatba."
-    "Ez után inkább víz kéne, nem több szó."
-    "A pult ezt most nem szolgálja ki."
-    "Ha még egy ilyet töltesz ki, borul az asztal."
-    "Kicsit sok lett benned a bátorság folyékony formában."
-    "Most inkább vizet kérj, ne szót."
-    "Ez már nem részegség, ez probléma."
-    "Ne rázd már a korsót, nem habverseny van."
-    "Kicsit túltoltad a komlót a dumába."
-    "Ez most olyan, mint a felmelegedett dobozos."
-    "Kicsit túlerjedt a stílusod."
-    "Nem kell mindenből nagyfröccsöt csinálni."
-    "Kicsit sok lett benned a házi főzet."
-    "Ne keverd túl, nem koktélverseny van."
-    "Kicsit túl sok lett a százalék benned."
-    "Ez most tiszta koccintós szint."
-    "Ez most tipik olcsó kör volt."
-    "Ezt még a koccintós is kikérné magának."
-    "Ne keverd a sört a pálinkával, meg a dumát a balhéval."
-    "Kicsit túl lett keverve a pia és az ego."
+    "Na ezt most elvitte a huzat a kocsmából.",
+    "Ezt most leöblítjük egy nagy csönddel.",
+    "Még egy ilyen, és a padló lesz a partnered.",
+    "Kocc, és már csúszol is kifelé.",
+    "Ez most olyan volt, mint a kiömlött sör – kár érte.",
+    "A kidobó már bemelegít rád.",
+    "Ez most egy lépés a kijárat felé.",
+    "Ez most már ajtóközeli viselkedés.",
+    "A következő köröd lehet kint lesz.",
+    "Ne ugass, hanem igyál csendben.",
+    "Ne rázd már a korsót, kifröccsen a hangulat.",
+    "Ezt most egy húzásra lenyeljük és elfelejtjük.",
+    "Kicsit túltoltad a szeszt a mondatba.",
+    "Ez után inkább víz kéne, nem több szó.",
+    "A pult ezt most nem szolgálja ki.",
+    "Ha még egy ilyet töltesz ki, borul az asztal.",
+    "Kicsit sok lett benned a bátorság folyékony formában.",
+    "Most inkább vizet kérj, ne szót.",
+    "Ez már nem részegség, ez probléma.",
+    "Ne rázd már a korsót, nem habverseny van.",
+    "Kicsit túltoltad a komlót a dumába.",
+    "Ez most olyan, mint a felmelegedett dobozos.",
+    "Kicsit túlerjedt a stílusod.",
+    "Nem kell mindenből nagyfröccsöt csinálni.",
+    "Kicsit sok lett benned a házi főzet.",
+    "Ne keverd túl, nem koktélverseny van.",
+    "Kicsit túl sok lett a százalék benned.",
+    "Ez most tiszta koccintós szint.",
+    "Ez most tipik olcsó kör volt.",
+    "Ezt még a koccintós is kikérné magának.",
+    "Ne keverd a sört a pálinkával, meg a dumát a balhéval.",
+    "Kicsit túl lett keverve a pia és az ego.",
     "Ne csinálj ebből tömény problémát."
 ]
 
@@ -206,7 +206,7 @@ MEDIUM_PATTERNS = {
 
 TARGETED_HINTS = (
     "te ", "neked", "téged", "veled", "rólad", "rolad", "teged",
-    "anyád", "anyad", "nektek", "ti ","te vagy", "te egy", "te egy kibaszott",
+    "anyád", "anyad", "nektek", "ti ", "te vagy", "te egy", "te egy kibaszott",
     "te ilyen", "te olyan",
     "neked mondom", "rád értettem",
     "miattad", "te miattad",
@@ -447,7 +447,10 @@ def severity_label(severity: int) -> str:
 
 
 def normalize_command(text: str) -> str:
-    cmd = (text or "").strip().split()[0].lower()
+    parts = (text or "").strip().split()
+    if not parts:
+        return ""
+    cmd = parts[0].lower()
     if "@" in cmd:
         cmd = cmd.split("@", 1)[0]
     return cmd
