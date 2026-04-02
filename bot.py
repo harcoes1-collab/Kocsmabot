@@ -5,8 +5,6 @@ import re
 import asyncio
 import random
 import html
-import threading
-from queue import Queue
 from datetime import datetime, timedelta, timezone
 
 from flask import Flask, request, abort
@@ -20,18 +18,16 @@ PORT = int(os.getenv("PORT", "8000"))
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
 
-# Nagyobb pool, hogy ne fogyjon el azonnal
 request_client = HTTPXRequest(
-    connection_pool_size=20,
-    pool_timeout=30.0,
-    read_timeout=30.0,
-    write_timeout=30.0,
-    connect_timeout=30.0,
+    connection_pool_size=10,
+    pool_timeout=20.0,
+    read_timeout=20.0,
+    write_timeout=20.0,
+    connect_timeout=20.0,
 )
 
 bot = Bot(BOT_TOKEN, request=request_client)
 flask_app = Flask(__name__)
-update_queue = Queue()
 
 DATA_FILE = "bot_data.json"
 
@@ -314,14 +310,9 @@ async def safe_warn_user(chat_id: int, user_id: int, text: str):
     set_last_warning_ts(chat_id, user_id, now_ts)
 
     try:
-        sent = await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode="HTML",
-        )
-        # a késleltetett törlést ugyanabban az event loopban intézzük
-        asyncio.create_task(delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS))
+        sent = await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
         logger.info("safe_warn_user: figyelmeztetés elküldve")
+        await delete_message_later(chat_id, sent.message_id, DELETE_WARNING_AFTER_SECONDS)
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
@@ -422,16 +413,10 @@ async def handle_moderation(message: dict):
 
     if offense_count == 1:
         mute_minutes = FIRST_MUTE_MINUTES
-        reason_text = (
-            f"⚠️ {user_mention} {random_message}\n"
-            f"{mute_minutes} perc pihenő."
-        )
+        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc pihenő."
     else:
         mute_minutes = REPEAT_MUTE_MINUTES
-        reason_text = (
-            f"⚠️ {user_mention} {random_message}\n"
-            f"{mute_minutes} perc csend."
-        )
+        reason_text = f"⚠️ {user_mention} {random_message}\n{mute_minutes} perc csend."
 
     until_date = datetime.now(timezone.utc) + timedelta(minutes=mute_minutes)
 
@@ -503,20 +488,6 @@ async def process_update_data(update_data: dict):
     await handle_moderation(message)
 
 
-def worker():
-    while True:
-        update_data = update_queue.get()
-        try:
-            asyncio.run(process_update_data(update_data))
-        except Exception:
-            logger.exception("Worker hiba update feldolgozás közben")
-        finally:
-            update_queue.task_done()
-
-
-threading.Thread(target=worker, daemon=True).start()
-
-
 @flask_app.get("/")
 def healthcheck():
     return "OK", 200
@@ -535,7 +506,13 @@ def webhook():
         abort(400)
 
     logger.info("Webhook update megérkezett: %s", update_data)
-    update_queue.put(update_data)
+
+    try:
+        asyncio.run(process_update_data(update_data))
+    except Exception:
+        logger.exception("Webhook feldolgozási hiba")
+        return "error", 500
+
     return "ok", 200
 
 
