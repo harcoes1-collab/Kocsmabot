@@ -292,7 +292,6 @@ async def delete_later(message, delay: int):
 
 async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     if not update.effective_chat or not update.effective_user:
-        logger.info("safe_warn_user: nincs effective_chat vagy effective_user")
         return
 
     chat_id = update.effective_chat.id
@@ -307,13 +306,13 @@ async def safe_warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     set_last_warning_ts(chat_id, user_id, now_ts)
 
     try:
-        logger.info("safe_warn_user: figyelmeztetés küldése chat_id=%s", chat_id)
         sent = await context.bot.send_message(
             chat_id=chat_id,
             text=text,
             parse_mode=ParseMode.HTML,
         )
         asyncio.create_task(delete_later(sent, DELETE_WARNING_AFTER_SECONDS))
+        logger.info("safe_warn_user: figyelmeztetés elküldve")
     except Exception:
         logger.exception("Nem sikerült figyelmeztető üzenetet küldeni.")
 
@@ -347,7 +346,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def offenses_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("offenses_command lefutott")
     if not update.message or not update.effective_chat or not update.effective_user:
-        logger.info("offenses_command: hiányzó update mezők")
         return
     count = get_offense(update.effective_chat.id, update.effective_user.id)
     try:
@@ -394,7 +392,6 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("moderate_message: kapott szöveg: %r", text)
 
     if not text.strip():
-        logger.info("moderate_message: üres szöveg")
         return
 
     found = contains_banned_content(text)
@@ -479,6 +476,10 @@ async def moderate_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_warn_user(update, context, reason_text)
 
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("PTB handler hiba", exc_info=context.error)
+
+
 def build_application() -> Application:
     app = Application.builder().token(BOT_TOKEN).build()
 
@@ -488,6 +489,7 @@ def build_application() -> Application:
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_members))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, moderate_message))
     app.add_handler(MessageHandler(filters.CAPTION, moderate_message))
+    app.add_error_handler(error_handler)
 
     return app
 
@@ -525,9 +527,9 @@ except Exception:
 def _log_task_result(future):
     try:
         future.result()
-        logger.info("Aszinkron webhook feldolgozás lefutott")
+        logger.info("Update betéve a queue-ba")
     except Exception:
-        logger.exception("Aszinkron webhook feldolgozási hiba")
+        logger.exception("Aszinkron queue hiba")
 
 
 @flask_app.get("/")
@@ -542,8 +544,6 @@ def health():
 
 @flask_app.post(f"/webhook/{WEBHOOK_SECRET}")
 def webhook():
-    global telegram_ready
-
     if not telegram_ready:
         logger.error("Telegram app még nem ready.")
         abort(503)
@@ -558,12 +558,12 @@ def webhook():
     try:
         update = Update.de_json(update_data, telegram_app.bot)
         future = asyncio.run_coroutine_threadsafe(
-            telegram_app.process_update(update),
+            telegram_app.update_queue.put(update),
             telegram_loop,
         )
         future.add_done_callback(_log_task_result)
     except Exception:
-        logger.exception("Nem sikerült ütemezni a webhook feldolgozást.")
+        logger.exception("Nem sikerült queue-ba rakni az update-et.")
         return "error", 500
 
     return "ok", 200
