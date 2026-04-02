@@ -490,6 +490,13 @@ except Exception:
     logger.exception("Nem sikerült inicializálni a Telegram applicationt.")
 
 
+def _log_task_result(future):
+    try:
+        future.result()
+    except Exception:
+        logger.exception("Aszinkron webhook feldolgozási hiba")
+
+
 @flask_app.get("/")
 def healthcheck():
     return "OK", 200
@@ -504,33 +511,29 @@ def health():
 def webhook():
     global telegram_ready
 
+    if not telegram_ready:
+        logger.error("Telegram app még nem ready.")
+        abort(503)
+
+    update_data = request.get_json(silent=True)
+    if not update_data:
+        logger.error("Nem jött JSON a webhookra.")
+        abort(400)
+
+    logger.info("Webhook update megérkezett: %s", update_data)
+
     try:
-        if not telegram_ready:
-            logger.error("Telegram app még nem ready.")
-            abort(503)
-
-        update_data = request.get_json(silent=True)
-        if not update_data:
-            logger.error("Nem jött JSON a webhookra.")
-            abort(400)
-
-        logger.info("Webhook update megérkezett: %s", update_data)
-
         update = Update.de_json(update_data, telegram_app.bot)
-
         future = asyncio.run_coroutine_threadsafe(
             telegram_app.process_update(update),
             telegram_loop,
         )
-
-        future.result(timeout=25)
-
-        logger.info("Webhook update feldolgozva.")
-        return "ok", 200
-
+        future.add_done_callback(_log_task_result)
     except Exception:
-        logger.exception("Hiba a webhook feldolgozás közben")
+        logger.exception("Nem sikerült ütemezni a webhook feldolgozást.")
         return "error", 500
+
+    return "ok", 200
 
 
 if __name__ == "__main__":
