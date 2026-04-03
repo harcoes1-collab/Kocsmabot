@@ -15,7 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "supersecret")
 PORT = int(os.getenv("PORT", "8000"))
 
-LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-5015553528"))
+LOG_CHAT_ID = int(os.getenv("LOG_CHAT_ID", "-1003886091540"))
 
 if not BOT_TOKEN:
     raise RuntimeError("Hiányzik a BOT_TOKEN környezeti változó.")
