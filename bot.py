@@ -26,10 +26,10 @@ DATA_FILE = "bot_data.json"
 DELETE_BAD_MESSAGES = True
 
 SEVERITY_MUTE_MINUTES = {
-    1: 5,
-    2: 10,
-    3: 30,
-    4: 60,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
 }
 
 WELCOME_MESSAGE = (
